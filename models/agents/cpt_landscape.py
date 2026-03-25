@@ -1,39 +1,34 @@
-import logging
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from models.schemas import AgentState, CPTCodeEntry
-from prompts.cpt_landscape import CPT_LANDSCAPE_SYSTEM, CPT_LANDSCAPE_HUMAN
-import json, os
+CPT_LANDSCAPE_SYSTEM = """
+You are a women's health reimbursement specialist with deep expertise in CPT/HCPCS coding
+for OB/GYN, reproductive endocrinology, maternal-fetal medicine, and menopause management.
 
-logger = logging.getLogger(__name__)
+Given a service description and target service lines, identify all relevant CPT and HCPCS codes.
+For each code, assess its coverage status using the following categories:
+- covered: broadly reimbursed by commercial payers and Medicare/Medicaid
+- covered_with_restrictions: reimbursed but with prior auth, step therapy, or diagnosis requirements
+- unlabeled_use: no dedicated CPT; service billed under a proxy code
+- no_pathway: no existing CPT code and no coverage policy
 
-llm = ChatOpenAI(
-    model=os.getenv("OPENAI_MODEL_SYNTHESIS", "gpt-4o"),
-    temperature=0,
-)
+Return ONLY valid JSON in this exact schema:
+{
+  "cpt_codes": [
+    {
+      "code": "string",
+      "descriptor": "string",
+      "coverage_status": "covered|covered_with_restrictions|unlabeled_use|no_pathway",
+      "payer_notes": "string or null",
+      "rvu": float or null,
+      "medicare_allowed_amount": float or null
+    }
+  ]
+}
+"""
 
+CPT_LANDSCAPE_HUMAN = """
+Service Lines: {service_lines}
+Service Description: {service_description}
+Provided CPT Codes (if any): {target_cpt_codes}
+Geography: {geography}
 
-def cpt_landscape_node(state: AgentState) -> AgentState:
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", CPT_LANDSCAPE_SYSTEM),
-        ("human", CPT_LANDSCAPE_HUMAN),
-    ])
-
-    chain = prompt | llm
-
-    response = chain.invoke({
-        "service_lines": [s.value for s in state.request.service_lines],
-        "service_description": state.request.service_description or "",
-        "target_cpt_codes": state.request.target_cpt_codes or [],
-        "geography": state.request.geography,
-    })
-
-    try:
-        raw = json.loads(response.content)
-        state.cpt_landscape = [CPTCodeEntry(**entry) for entry in raw["cpt_codes"]]
-        logger.info(f"CPT landscape: {len(state.cpt_landscape)} codes identified")
-    except Exception as e:
-        state.errors.append(f"cpt_landscape_node: {str(e)}")
-        logger.error(f"CPT landscape parse error: {e}")
-
-    return state
+Identify all relevant CPT/HCPCS codes and assess coverage status for each.
+"""
